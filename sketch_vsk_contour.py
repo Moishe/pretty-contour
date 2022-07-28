@@ -76,9 +76,10 @@ class VskContourSketch(vsketch.SketchClass):
     raster = []
 
     def draw(self, vsk: vsketch.Vsketch) -> None:
-        vsk.size("11x17in", landscape=False)
+        vsk.size("18x24in", landscape=False)
         #image = Image.open('/Users/moishe/frames/main-2/fast-2-00914-main.png')
-        image = Image.open('/Users/moishe/Desktop/Source/other-mandala-1.jpg')
+        image = Image.open('/Users/moishe/Desktop/Source/mandala-2-processed.jpg')
+        #image = Image.open('/Users/moishe/batch-output-14/sample-26-00001-main.png')
         # convert image to numpy array
         rgb_im = image.convert('RGB')
         self.data = np.array(rgb_im)
@@ -106,7 +107,7 @@ class VskContourSketch(vsketch.SketchClass):
             layers = [self.default_layer]
 
         for layer in layers:
-            contour_line_hash = {}
+            line_hash = defaultdict(list)
             data = np.rot90(orig_data[:, :, layer], 2)
             if not len(levels):
                 levels = self.contour_levels
@@ -140,36 +141,55 @@ class VskContourSketch(vsketch.SketchClass):
                             dy = dy * 1/length * self.line_length
                             dx = dx * 1/length * self.line_length
 
+                            # put a little buffer in so everything doesn't intersect
+                            x -= dy * 0.001
+                            y -= dx * 0.001
+
                             #vsk.line(x, y, (x - dy), (y - dx))
                             #vsk.line(x1, y1, x2, y2)
-                            contour_lines.append((x, y, x - dy, y - dx))
-                            if (x,y) in contour_line_hash:
-                                print("hmm, collision")
-                            contour_line_hash[(x,y)] = (x, y, x - dy, y - dx)
-                            orth_lines.append((x1, y1, x2, y2))
-
-            print("Processing %d lines" % len(orth_lines))
+                            orth_lines.append((x, y, x - dy, y - dx))
+                            line_hash[int(x), int(y)].append((x, y, x - dy, y - dx))
+                            line_hash[(int(x1),int(y1))].append((x1, y1, x2, y2))
+                            contour_lines.append((x1, y1, x2, y2))
 
             if self.check_for_overlaps:
+                print("Checking for overlaps with %d lines in hash containing %d points" % (len(orth_lines), len(line_hash)))
                 for (i, line1) in enumerate(orth_lines):
                     if i % 1000 == 0:
                         print(i)
-                    for (j, line2) in enumerate(contour_lines):
-                        if i == j:
-                            continue
-                        (x1, y1, x2, y2) = line1
-                        (x3, y3, x4, y4) = line2
-                        intersections = edge_intersection(x1, y1, x2, y2, x3, y3, x4, y4)
-                        if intersections:
-                            (new_x, new_y) = intersections
-                            orth_lines[i] = (x1, y1, new_x, new_y) #longest(line1, new_x, new_y)
-                            #orth_lines[j] = longest(line2, new_x, new_y)
+                    (x1, y1, x2, y2) = line1
+                    for x in range(int(x1 - self.line_length * 2), int(x1 + self.line_length * 2 + 1)):
+                        for y in range(int(y1 - self.line_length * 2), int(y1 + self.line_length * 2 + 1)):
+                            if (x, y) in line_hash:
+                                for line2 in line_hash[(x,y)]:
+                                    (x3, y3, x4, y4) = line2
 
-            vsk.stroke(layer + 1)
+                                    intersections = edge_intersection(x1, y1, x2, y2, x3, y3, x4, y4)
+                                    if intersections:
+                                        (new_x, new_y) = intersections
+                                        orth_lines[i] = longest(line1, new_x, new_y) #(x2, y2, new_x, new_y) #
+
+                print("Checking for overlaps with %d lines in hash containing %d points" % (len(contour_lines), len(line_hash)))
+                for (i, line1) in enumerate(contour_lines):
+                    if i % 1000 == 0:
+                        print(i)
+                    (x1, y1, x2, y2) = line1
+                    for x in range(int(x1 - self.line_length * 2), int(x1 + self.line_length * 2 + 1)):
+                        for y in range(int(y1 - self.line_length * 2), int(y1 + self.line_length * 2 + 1)):
+                            if (x, y) in line_hash:
+                                for line2 in line_hash[(x,y)]:
+                                    (x3, y3, x4, y4) = line2
+
+                                    intersections = edge_intersection(x1, y1, x2, y2, x3, y3, x4, y4)
+                                    if intersections:
+                                        (new_x, new_y) = intersections
+                                        contour_lines[i] = longest(line1, new_x, new_y) #(x2, y2, new_x, new_y) #
+            vsk.stroke(1)
             for line in orth_lines:
                 (x, y, x1, y1) = line
                 vsk.line(x, y, x1, y1)
 
+            vsk.stroke(2)
             for line in contour_lines:
                 (x, y, x1, y1) = line
                 vsk.line(x, y, x1, y1)
