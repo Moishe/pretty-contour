@@ -1,8 +1,9 @@
 from re import L
 import vsketch
 import math
-from collections import defaultdict
+import random
 
+from collections import defaultdict
 import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
@@ -72,14 +73,18 @@ class VskContourSketch(vsketch.SketchClass):
     contour_levels = vsketch.Param(3)
     layer_separation = vsketch.Param(False)
     default_layer = vsketch.Param(0)
+    draw_flow_field = vsketch.Param(False)
+    draw_contour = vsketch.Param(True)
+    draw_perpendicular = vsketch.Param(True)
 
     raster = []
 
     def draw(self, vsk: vsketch.Vsketch) -> None:
-        vsk.size("18x24in", landscape=False)
+        vsk.size("a4", landscape=True)
         #image = Image.open('/Users/moishe/frames/main-2/fast-2-00914-main.png')
-        image = Image.open('/Users/moishe/Desktop/Source/mandala-2-processed.jpg')
+        #image = Image.open('/Users/moishe/batch-output-14/mains/sample-57-00001-main.png')
         #image = Image.open('/Users/moishe/batch-output-14/sample-26-00001-main.png')
+        image = Image.open('/Users/moishe/frames/fast-4-00004-main.png')
         # convert image to numpy array
         rgb_im = image.convert('RGB')
         self.data = np.array(rgb_im)
@@ -92,12 +97,12 @@ class VskContourSketch(vsketch.SketchClass):
 
         orig_data = gaussian_filter(data, sigma=3)
 
-        fig = plt.gcf()
-        INCH_HEIGHT = 8
-        INCH_WIDTH = INCH_HEIGHT * (WIDTH / HEIGHT)
-        fig.set_size_inches(INCH_HEIGHT, INCH_WIDTH)
+        #fig = plt.gcf()
+        #INCH_HEIGHT = 8
+        #INCH_WIDTH = INCH_HEIGHT * (WIDTH / HEIGHT)
+        #fig.set_size_inches(INCH_HEIGHT, INCH_WIDTH)
         plt.axis('off')
-        vsk.scale(vsk.width / (data.shape[0] * 1.1))
+        vsk.scale(vsk.width / (data.shape[0] * 1.4))
 
         levels = []
 
@@ -184,20 +189,94 @@ class VskContourSketch(vsketch.SketchClass):
                                     if intersections:
                                         (new_x, new_y) = intersections
                                         contour_lines[i] = longest(line1, new_x, new_y) #(x2, y2, new_x, new_y) #
-            vsk.stroke(1)
-            for line in orth_lines:
-                (x, y, x1, y1) = line
-                vsk.line(x, y, x1, y1)
 
-            vsk.stroke(2)
-            for line in contour_lines:
-                (x, y, x1, y1) = line
-                vsk.line(x, y, x1, y1)
+            #if self.draw_flow_field:
+            #    self.draw_flow_field(vsk)
+
+            if self.draw_perpendicular:
+                vsk.stroke(1)
+                for line in orth_lines:
+                    (x, y, x1, y1) = line
+                    vsk.line(x, y, x1, y1)
+
+            if self.draw_contour:
+                vsk.stroke(2)
+                for line in contour_lines:
+                    (x, y, x1, y1) = line
+                    vsk.line(x, y, x1, y1)
 
             print(len(orth_lines))
 
     def finalize(self, vsk: vsketch.Vsketch) -> None:
         vsk.vpype("linemerge linesimplify reloop linesort")
+
+    def draw_flow_field(self, vsk):
+        FLOW_FIELD_WIDTH = int(HEIGHT / self.line_length)
+        FLOW_FIELD_HEIGHT = int(WIDTH / self.line_length)
+        flow_field = [(0, 0)] * (max(FLOW_FIELD_WIDTH, FLOW_FIELD_HEIGHT) ** 2)
+        # seed it
+        for line in orth_lines:
+            (x, y, x1, y1) = line
+            vector = (x1 - x, y1 - y)
+            y = int(y / self.line_length)
+            x = int(x / self.line_length)
+            idx = y * FLOW_FIELD_WIDTH + x
+            flow_field[idx] = vector
+
+        RANGE = 2
+        ACUITY = 1
+        for i in range(0, 8):
+            print(i)
+            new_flow_field = flow_field.copy()
+            for x in range(0, FLOW_FIELD_WIDTH):
+                for y in range(0, FLOW_FIELD_HEIGHT):
+                    idx = y * FLOW_FIELD_WIDTH + x
+                    if (flow_field[idx] == (0,0)):
+                        sum = [flow_field[idx][0] * ACUITY, flow_field[idx][1] * ACUITY]
+                        count = ACUITY
+                        for x1 in range(max(0, x - RANGE), min(FLOW_FIELD_WIDTH - 1, x + RANGE)):
+                            for y1 in range(max(0, y - RANGE), min(FLOW_FIELD_HEIGHT - 1, y + RANGE)):
+                                idx = y1 * FLOW_FIELD_WIDTH + x1
+                                if (flow_field[idx] == (0,0)):
+                                    continue
+                                count += 1
+                                sum[0] += flow_field[idx][0]
+                                sum[1] += flow_field[idx][1]
+                        new_flow_field[idx] = (sum[0] / count, sum[1] / count)
+            flow_field = new_flow_field.copy()
+
+        vsk.stroke(3)
+        for x in range(0, FLOW_FIELD_WIDTH):
+            for y in range(0, FLOW_FIELD_HEIGHT):
+                idx = y * FLOW_FIELD_WIDTH + x
+                xx = x * self.line_length
+                yy = y * self.line_length
+                #vsk.line(xx, yy, xx + flow_field[idx][0], yy + flow_field[idx][1])
+
+        random.shuffle(orth_lines)
+        for line in orth_lines:
+            (x, y, dx, dy) = line
+            dx = dx - x
+            dy = dy - y
+            #vsk.line(x, y, dx, dy)
+            for i in range(0, 10):
+                prev_x = x
+                prev_y = y
+                x += dx
+                y += dy
+                if (x < 0 or x > WIDTH or y < 0 or y > HEIGHT):
+                    break
+
+                ffx = int(x / self.line_length)
+                ffy = int(y / self.line_length)
+                idx = ffy * FLOW_FIELD_WIDTH + ffx
+
+                if (flow_field[idx] != (0,0)):
+                    dx = (dx + flow_field[idx][0]) / 2
+                    dy = (dy + flow_field[idx][0]) / 2
+
+                vsk.line(prev_x, prev_y, x, y)
+
 
 
 if __name__ == "__main__":
