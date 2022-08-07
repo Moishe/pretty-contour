@@ -75,6 +75,7 @@ class VskContourSketch(vsketch.SketchClass):
     draw_contour = vsketch.Param(True)
     draw_perpendicular = vsketch.Param(True)
     check_for_overlaps = vsketch.Param(False)
+    invert_line_direction = vsketch.Param(False)
 
     raster = []
     lines = []
@@ -82,34 +83,47 @@ class VskContourSketch(vsketch.SketchClass):
 
     def insert_line(self, line):
         (t, i, x, y, x1, y1) = line
+        line = (t, len(self.lines), x, y, x1, y1)
         self.lines.append(line)
         self.points.append((x, y, x <= x1, len(self.lines) - 1))
         self.points.append((x1, y1, x1 < x, len(self.lines) - 1))
 
     def truncate_lines(self):
-        for i in range(0, len(self.lines)):
-            if i % 1000 == 0:
-                print(i)
-            line1 = self.lines[i]
-            (t1, i1, x1, y1, x2, y2) = line1
-            if t1 == 'c':
-                continue
-            for j in range(0, len(self.lines)):
-                if i == j:
-                    continue
-                line2 = self.lines[j]
-                (t2, _, x3, y3, x4, y4) = line2
-                if t2 == 'p':
-                    continue
+        # build hash
+        line_hash = defaultdict(list)
+        for l in self.lines:
+            (t, i, x, y, x1, y1) = l
+            mix = math.floor(min(x, x1))
+            miy = math.floor(min(y, y1))
+            mxx = math.floor(max(x, x1) + 1)
+            mxy = math.floor(max(y, y1) + 1)
+            for xx in range(mix, mxx + 1):
+                for yy in range(miy, mxy + 1):
+                    line_hash[(xx, yy)].append(i)
 
-                intersection = edge_intersection(x1, y1, x2, y2, x3, y3, x4, y4)
-                if (intersection):
-                    (x1, y1, x2, y2) = (x1, y1, intersection[0], intersection[1])
-                    #(x1, y1, x2, y2) = longest(x1, y1, x2, y2, intersection[0], intersection[1])
-                    new_line = (t1, i1, x1, y1, x2, y2)
-                    self.lines[i] = new_line
-                    line1 = new_line
-                    (t1, i1, x1, y1, x2, y2) = line1
+        for (idx, l) in enumerate(self.lines):
+            if idx % 1000 == 0:
+                print(idx)
+            (t, i, x, y, x1, y1) = l
+            if t == 'c':
+                continue
+            mix = math.floor(min(x, x1))
+            miy = math.floor(min(y, y1))
+            mxx = math.floor(max(x, x1) + 1)
+            mxy = math.floor(max(y, y1) + 1)
+            for xx in range(mix, mxx + 1):
+                for yy in range(miy, mxy + 1):
+                    for lidx in line_hash[(xx, yy)]:
+                        if lidx != i:
+                            (t2, i2, x2, y2, x3, y3) = self.lines[lidx]
+                            if t2 != 'c':
+                                continue
+                            intersection = edge_intersection(x, y, x1, y1, x2, y2, x3, y3)
+                            if (intersection):
+                                #(x, y, x1, y1) = (x, y, intersection[0], intersection[1])
+                                (x, y, x1, y1) = longest(x, y, x1, y1, intersection[0], intersection[1])
+                                new_line = (t, idx, x, y, x1, y1)
+                                self.lines[idx] = new_line
 
     def build_lines(self, contours):
         for contour in contours:
@@ -131,17 +145,28 @@ class VskContourSketch(vsketch.SketchClass):
                         dy = dy * 1/length * self.line_length
                         dx = dx * 1/length * self.line_length
 
+                        if self.invert_line_direction:
+                            dy = -dy
+                            dx = -dx
+
                         # put a little buffer in so everything doesn't intersect
-                        x -= dy * 0.001
-                        y -= dx * 0.001
+                        x -= dy * 0.01
+                        y -= dx * 0.01
 
                         self.insert_line(('p', i, x, y, x - dy, y - dx))
                         self.insert_line(('c', i, x1, y1, x2, y2))
 
+    def draw_diminishing_line(self, vsk, x, y, x1, y1):
+        dx = x1 - x
+        dy = y1 - y
+        vsk.line(x, y, x1, y1)
+
+
     def draw(self, vsk: vsketch.Vsketch) -> None:
         vsk.size("a4", landscape=True)
+        image = Image.open('/Users/moishe/batch-output-14/sample-53-00001-main.png')
         #image = Image.open('/Users/moishe/Desktop/Source/other-mandala-bw.jpg')
-        image = Image.open('/Users/moishe/frames/a4-4b-00003-main.png')
+        #image = Image.open('/Users/moishe/frames/a4-4b-00003-main.png')
         #image = Image.open('/Users/moishe/Desktop/Source/gradient-test.jpg')
         rgb_im = image.convert('RGB')
         self.data = np.array(rgb_im)
@@ -184,7 +209,7 @@ class VskContourSketch(vsketch.SketchClass):
             (t, i, x, y, x1, y1) = line
             if (t == 'p' and self.draw_perpendicular):
                 vsk.stroke(2)
-                vsk.line(x, y, x1, y1)
+                self.draw_diminishing_line(vsk, x, y, x1, y1)
             if (t == 'c' and self.draw_contour):
                 vsk.stroke(1)
                 vsk.line(x, y, x1, y1)
